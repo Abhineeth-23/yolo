@@ -1,36 +1,38 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
-import onnxruntime
-from PIL import Image
-import numpy as np
-import io
 from fastapi.middleware.cors import CORSMiddleware
+from ultralytics import YOLO
+from PIL import Image
+import io
 
+# 👉 Create the FastAPI app
+app = FastAPI()
+
+# 👉 Allow CORS (frontend -> backend calls allowed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Or you can specify your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# 👉 Load your trained YOLO model
+model = YOLO("yolov8n.onnx")  # or your own model filename
 
-app = FastAPI()
-
-# Load the ONNX model once
-session = onnxruntime.InferenceSession("yolov8n.onnx", providers=["CPUExecutionProvider"])
-
+# 👉 Create the API route
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert('RGB')
-    img = np.array(image)
+    image = Image.open(io.BytesIO(contents))
+    results = model(image)
 
-    # Preprocess according to YOLOv8 input needs
-    img = img.transpose(2, 0, 1)  # Channels first
-    img = img[np.newaxis, ...].astype('float32') / 255.0
+    # Prepare the output
+    output = []
+    for box in results[0].boxes:
+        output.append({
+            "class": model.names[int(box.cls[0])],
+            "confidence": float(box.conf[0]),
+            "box": box.xyxy[0].tolist()
+        })
 
-    inputs = {session.get_inputs()[0].name: img}
-    outputs = session.run(None, inputs)
-
-    return JSONResponse(content={"output": outputs})
+    return output
