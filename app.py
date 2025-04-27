@@ -1,29 +1,26 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
-import onnxruntime as ort
+import onnxruntime
 from PIL import Image
 import numpy as np
 import io
 
 app = FastAPI()
 
-# Load the ONNX model
-session = ort.InferenceSession('yolov8n.onnx')
+# Load the ONNX model once
+session = onnxruntime.InferenceSession("yolov8n.onnx", providers=["CPUExecutionProvider"])
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     contents = await file.read()
-    img = Image.open(io.BytesIO(contents)).convert('RGB')
+    image = Image.open(io.BytesIO(contents)).convert('RGB')
+    img = np.array(image)
 
-    # Preprocess the image
-    img = img.resize((640, 640))  # YOLOv8 input size
-    img_data = np.array(img) / 255.0
-    img_data = img_data.transpose(2, 0, 1)  # Channels first
-    img_data = np.expand_dims(img_data, axis=0).astype(np.float32)
+    # Preprocess according to YOLOv8 input needs
+    img = img.transpose(2, 0, 1)  # Channels first
+    img = img[np.newaxis, ...].astype('float32') / 255.0
 
-    # Run inference
-    inputs = {session.get_inputs()[0].name: img_data}
+    inputs = {session.get_inputs()[0].name: img}
     outputs = session.run(None, inputs)
 
-    # Return raw model outputs (later we can improve)
-    return JSONResponse(content={"outputs": outputs[0].tolist()})
+    return JSONResponse(content={"output": outputs})
